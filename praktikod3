@@ -1,0 +1,171 @@
+body {
+    font-family: Arial, sans-serif;
+    background: #f5f7fa;
+    margin: 0;
+    padding: 40px;
+    direction: rtl;
+    text-align: right;
+}
+
+h2 {
+    color: #333;
+    font-weight: 600;
+    margin-bottom: 25px;
+}
+
+form {
+    background: #ffffff;
+    padding: 25px;
+    border-radius: 12px;
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.1);
+    width: 350px;
+}
+
+label {
+    font-weight: 500;
+    color: #444;
+}
+
+input[type="text"],
+input[type="file"],
+textarea {
+    width: 100%;
+    padding: 10px;
+    margin-top: 6px;
+    margin-bottom: 16px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+    box-sizing: border-box;
+    transition: 0.2s;
+}
+
+input:focus,
+textarea:focus {
+    border-color: #4a90e2;
+    outline: none;
+    box-shadow: 0 0 5px rgba(74, 144, 226, 0.3);
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background: #4a90e2;
+    border: none;
+    color: white;
+    font-size: 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+button:hover {
+    background: #357ABD;
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="styles.css">
+    <title>Open Outlook Draft</title>
+</head>
+<body>
+    <h2>יצירת טיוטת מייל ב-Outlook</h2>
+    <form id="mailForm">
+        <label>נושא:</label><br>
+        <input type="text" name="subject"><br><br>
+
+        <label>נמענים (מופרדים בפסיק):</label><br>
+        <input type="text" name="recipients"><br><br>
+
+        <label>גוף ההודעה:</label><br>
+        <textarea name="body" rows="5" cols="40"></textarea><br><br>
+
+        <label>קובץ מצורף:</label><br>
+        <input type="file" name="attachment"><br><br>
+
+        <button type="submit">שליחה</button>
+    </form>
+
+    <script>
+    const form = document.getElementById('mailForm');
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const data = new FormData(form);
+
+        const response = await fetch('http://localhost:5000/sendMail', {
+            method: 'POST',
+            body: data
+        });
+
+        if(response.ok){
+            alert('טיוטות נפתחו ב-Outlook!');
+        } else {
+            alert('שגיאה, בדוק את השרת ואת Outlook.');
+        }
+    });
+    </script>
+</body>
+</html>
+
+from flask import Flask, request
+import win32com.client
+import pythoncom
+import os
+import time
+
+app = Flask(__name__)
+
+def ensure_outlook_running():
+    """מנסה להתחבר ל-Outlook, ואם לא רץ – מפעיל אותו"""
+    try:
+        outlook = win32com.client.Dispatch('Outlook.Application')
+    except:
+        # אם לא רץ, פותח את Outlook
+        os.startfile("outlook")
+        # נותן לו כמה שניות לעלות
+        time.sleep(5)
+        outlook = win32com.client.Dispatch('Outlook.Application')
+    return outlook
+
+# Route לשליחת מייל עם אפשרות לצירוף קובץ
+@app.route('/sendMail', methods=['POST'])
+def send_mail():
+    # CoInitialize ל-thread של Flask
+    pythoncom.CoInitialize()
+
+    subject = request.form.get('subject', '')
+    body = request.form.get('body', '')
+    recipients = request.form.get('recipients', '').split(',')
+    file = request.files.get('attachment')
+
+    # שמירה זמנית של הקובץ
+    attachment_path = None
+    if file and file.filename != '':
+        attachment_path = os.path.join(os.getcwd(), file.filename)
+        file.save(attachment_path)
+
+    outlook = ensure_outlook_running()
+
+    for recipient in recipients:
+        mail = outlook.CreateItem(0)  # 0 = olMailItem
+        mail.Subject = subject
+        mail.Body = body
+        mail.To = recipient.strip()
+        if attachment_path:
+            mail.Attachments.Add(attachment_path)
+        # שמירה אוטומטית בתיקיית Drafts
+        mail.Save()
+        # גם לפתוח חלון לעריכה אם רוצים
+        mail.Display()
+
+    return 'OK'
+
+@app.route('/')
+def home():
+    return 'Outlook Service is running!'
+
+if __name__ == '__main__':
+    app.run(port=5000)
